@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/himalayas-api/:path*",
+      "destination": "https://himalayas.app/jobs/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
