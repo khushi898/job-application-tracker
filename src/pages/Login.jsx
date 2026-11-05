@@ -1,229 +1,73 @@
 import { useState } from "react";
-import { Link, useNavigate,useSearchParams } from "react-router-dom";
-import "./Auth.css";
+import { Navigate, useLocation } from "react-router-dom";
+import { ArrowRight, BriefcaseBusiness } from "lucide-react";
+import ThemeToggle from "../components/layout/ThemeToggle.jsx";
+import Button from "../components/ui/Button.jsx";
+import FormField from "../components/ui/FormField.jsx";
+import { useAuth } from "../hooks/useAuth.js";
 
 function Login() {
-  const navigate = useNavigate();
-  const [searchParams,setSearchParams]=useSearchParams();
-  const [mode, setMode] = useState(
-    searchParams.get("mode") === "signup" ? "signup" : "signin"
-  );
+  const { user, login } = useAuth();
+  const location = useLocation();
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
-  const switchMode = (nextMode) => {
-    setMode(nextMode);
-    setError("");
-    setMessage("");
-    setPassword("");
-    setConfirmPassword("");
-    setSearchParams(nextMode === "signup" ? {mode: "signup"} : {});
-  };
+  // Once login() updates Context this page re-renders and lands here.
+  if (user) {
+    const destination = location.state?.from?.pathname || "/dashboard";
+    return <Navigate to={destination} replace />;
+  }
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    setError("");
-    setMessage("");
+  function handleSubmit(event) {
+    event.preventDefault();
 
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
 
-    if (mode === "signup") {
-      if (!name.trim()) {
-        setError("Please enter your name.");
-        return;
-      }
-
-      if (password.length < 8) {
-        setError("Password must be at least 8 characters.");
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setError("Passwords do not match.");
-        return;
-      }
-
-      const accounts = JSON.parse(
-        localStorage.getItem("jobTrackerDemoUsers") || "[]"
-      );
-
-      if (accounts.some((user) => user.email === cleanEmail)) {
-        setError("This email is already registered.");
-        return;
-      }
-
-      accounts.push({
-        id: crypto.randomUUID(),
-        name: name.trim(),
-        email: cleanEmail,
-        password,
-      });
-
-      localStorage.setItem(
-        "jobTrackerDemoUsers",
-        JSON.stringify(accounts)
-      );
-
-      setMode("signin");
-      setPassword("");
-      setConfirmPassword("");
-      setMessage("Account created! Please sign in.");
+    if (!cleanName) {
+      setError("Enter your name to continue.");
       return;
     }
 
-    const accounts = JSON.parse(
-      localStorage.getItem("jobTrackerDemoUsers") || "[]"
-    );
-
-    const validDemo =
-      cleanEmail === "demo@jobtracker.com" &&
-      password === "Demo123!";
-
-    const validAccount = accounts.some(
-      (user) =>
-        user.email === cleanEmail &&
-        user.password === password
-    );
-
-    if (!validDemo && !validAccount) {
-      setError("Invalid email or password.");
-      return;
-    }
-
-    sessionStorage.setItem("jobTrackerLoggedIn", "true");
-    sessionStorage.setItem("jobTrackerUserEmail", cleanEmail);
-    navigate("/dashboard", { replace: true });
-  };
+    login(cleanName);
+  }
 
   return (
-    <main className="auth-page">
-      <div className="auth-card">
-        <div className="auth-icon">💼</div>
+    <main className="login-page">
+      <ThemeToggle className="login-theme-toggle" />
 
-        <h1>
-          {mode === "signin" ? "Welcome Back" : "Create Account"}
-        </h1>
+      <div className="login-card">
+        <span className="brand-icon brand-icon-lg">
+          <BriefcaseBusiness size={26} aria-hidden="true" />
+        </span>
 
-        <p className="auth-subtitle">
-          {mode === "signin"
-            ? "Sign in to manage your career journey"
-            : "Start tracking your next opportunity"}
+        <h1>Welcome to JobTracker</h1>
+        <p className="login-subtitle">
+          Keep every application, interview and follow-up in one place.
         </p>
 
-        <div className="auth-tabs">
-          <button
-            type="button"
-            className={mode === "signin" ? "active" : ""}
-            onClick={() => switchMode("signin")}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            className={mode === "signup" ? "active" : ""}
-            onClick={() => switchMode("signup")}
-          >
-            Sign Up
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="auth-form">
-          {mode === "signup" && (
-            <>
-              <label htmlFor="auth-name">Full Name</label>
-              <input
-                id="auth-name"
-                type="text"
-                placeholder="Enter your full name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </>
-          )}
-
-          <label htmlFor="auth-email">Email Address</label>
-          <input
-            id="auth-email"
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
+        <form onSubmit={handleSubmit} noValidate>
+          <FormField
+            id="login-name"
+            label="Your name"
+            placeholder="e.g. Priya"
+            autoComplete="name"
+            value={name}
+            onChange={(event) => {
+              setName(event.target.value);
+              setError("");
+            }}
+            error={error}
           />
 
-          <label htmlFor="auth-password">Password</label>
-          <div className="auth-password-field">
-            <input
-              id="auth-password"
-              type={showPassword ? "text" : "password"}
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-            <button
-              type="button"
-              className="auth-show-password"
-              onClick={() => setShowPassword(!showPassword)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
-          </div>
-
-          {mode === "signup" && (
-            <>
-              <label htmlFor="auth-confirm">
-                Confirm Password
-              </label>
-              <input
-                id="auth-confirm"
-                type={showPassword ? "text" : "password"}
-                placeholder="Confirm your password"
-                value={confirmPassword}
-                onChange={(e) =>
-                  setConfirmPassword(e.target.value)
-                }
-                required
-              />
-            </>
-          )}
-
-          {error && <p className="auth-error" role="alert">{error}</p>}
-          {message && <p className="auth-success">{message}</p>}
-
-          <button type="submit" className="auth-submit">
-            {mode === "signin" ? "Sign In →" : "Create Account →"}
-          </button>
+          <Button type="submit" className="login-submit">
+            Continue
+            <ArrowRight size={17} aria-hidden="true" />
+          </Button>
         </form>
 
-        <p className="auth-switch">
-          {mode === "signin"
-            ? "Don't have an account?"
-            : "Already have an account?"}{" "}
-          <button
-            type="button"
-            onClick={() =>
-              switchMode(mode === "signin" ? "signup" : "signin")
-            }
-          >
-            {mode === "signin" ? "Sign Up" : "Sign In"}
-          </button>
+        <p className="login-note">
+          Demo login: no password needed. Your data stays in this browser.
         </p>
-
-        <p className="auth-demo">
-          Demo: demo@jobtracker.com / Demo123!
-        </p>
-
-        <Link to="/dashboard" className="auth-back">
-          ← Back to Dashboard
-        </Link>
       </div>
     </main>
   );

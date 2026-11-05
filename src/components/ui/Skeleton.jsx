@@ -1,0 +1,5 @@
+function Skeleton({ width = "100%", height = "1rem" }) {
+  return <span className="skeleton" style={{ width, height }} />;
+}
+
+export default Skeleton;

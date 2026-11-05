@@ -1,780 +1,207 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { CloudOff, RefreshCw, SearchX } from "lucide-react";
+import JobCard from "../components/jobs/JobCard.jsx";
+import JobCardSkeleton from "../components/jobs/JobCardSkeleton.jsx";
+import Button from "../components/ui/Button.jsx";
+import EmptyState from "../components/ui/EmptyState.jsx";
+import PageHeader from "../components/ui/PageHeader.jsx";
+import Pagination from "../components/ui/Pagination.jsx";
+import { useApplications } from "../hooks/useApplications.js";
+import { useRemoteJobs } from "../hooks/useRemoteJobs.js";
 
-import {
-  Search,
-  MapPin,
-  Building2,
-  BriefcaseBusiness,
-  ExternalLink,
-  SlidersHorizontal,
-  Globe2,
-  Clock3,
-  RefreshCw,
-  X,
-  Check,
-} from "lucide-react";
-
-import { useApplications } from "../context/ApplicationContext.jsx";
-
-import "./ExploreJobs.css";
-
-const IT_KEYWORDS = [
-  "developer",
-  "engineer",
-  "software",
-  "react",
-  "frontend",
-  "front-end",
-  "front end",
-  "backend",
-  "back-end",
-  "back end",
-  "fullstack",
-  "full-stack",
-  "full stack",
-  "devops",
-  "cloud",
-  "data scientist",
-  "data engineer",
-  "machine learning",
-  "cybersecurity",
-  "security engineer",
-  "programmer",
-  "web development",
-  "technical lead",
-  "tech lead",
-  "qa engineer",
-  "test automation",
-];
-
-const SEARCH_TERMS = [
-  "software engineer",
-  "react developer",
-  "frontend developer",
-  "full stack developer",
-  "devops engineer",
-];
-
-function isITJob(job) {
-  const text = `${job.title || ""} ${job.category || ""}`
-    .toLowerCase();
-
-  return IT_KEYWORDS.some((word) => text.includes(word));
-}
-
-function formatJobType(type) {
-  return (type || "Remote")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatSalary(job) {
-  if (job.salary) return job.salary;
-
-  if (job.minSalary == null && job.maxSalary == null) {
-    return null;
-  }
-
-  const currency = job.currency || "USD";
-
-  const format = (amount) => {
-    try {
-      return new Intl.NumberFormat("en-GB", {
-        style: "currency",
-        currency,
-        maximumFractionDigits: 0,
-      }).format(amount);
-    } catch {
-      return `${amount} ${currency}`;
-    }
-  };
-
-  const range =
-    job.minSalary != null && job.maxSalary != null
-      ? `${format(job.minSalary)} – ${format(job.maxSalary)}`
-      : job.minSalary != null
-      ? `From ${format(job.minSalary)}`
-      : `Up to ${format(job.maxSalary)}`;
-
-  return `${range} / ${job.salaryPeriod || "annual"}`;
-}
-
-function normalizeRemotive(job) {
-  return {
-    id: `remotive-${job.id}`,
-    title: job.title,
-    company_name: job.company_name,
-    candidate_required_location:
-      job.candidate_required_location || "Remote",
-    job_type: job.job_type,
-    category: job.category,
-    salary: job.salary,
-    publication_date: job.publication_date,
-    url: job.url,
-    source: "Remotive",
-  };
-}
-
-function normalizeHimalayas(job) {
-  const locations = Array.isArray(job.locationRestrictions)
-    ? job.locationRestrictions
-        .map((item) =>
-          typeof item === "string"
-            ? item
-            : item?.name || item?.country || ""
-        )
-        .filter(Boolean)
-    : [];
-
-  return {
-    id: `himalayas-${job.guid}`,
-    title: job.title,
-    company_name: job.companyName,
-    candidate_required_location:
-      locations.join(", ") || "Worldwide",
-    job_type: job.employmentType,
-    category:
-      job.categories?.[0] ||
-      job.parentCategories?.[0] ||
-      "Software Development",
-    minSalary: job.minSalary,
-    maxSalary: job.maxSalary,
-    currency: job.currency,
-    salaryPeriod: job.salaryPeriod,
-    publication_date: job.pubDate
-      ? new Date(job.pubDate * 1000).toISOString()
-      : null,
-    url: job.applicationLink,
-    source: "Himalayas",
-  };
-}
+const JOBS_PER_PAGE = 12;
+const SKELETON_IDS = ["a", "b", "c", "d", "e", "f"];
+const DEFAULT_FILTERS = { search: "", location: "", category: "All" };
 
 function ExploreJobs() {
-  // CONTEXT API
   const { applications, addApplication } = useApplications();
+  const { jobs, loading, error, refresh } = useRemoteJobs();
 
-  // PAGE STATE
-  const [jobs, setJobs] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [category, setCategory] = useState("all");
-  const [location, setLocation] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [page, setPage] = useState(1);
 
-  const jobsPerPage = 12;
-
-  // FETCH REMOTE IT JOBS
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function fetchJobs() {
-      setLoading(true);
-      setError("");
-
-      const collectedJobs = [];
-      let successfulSources = 0;
-
-      try {
-        // SOURCE 1: REMOTIVE
-        const remotiveRequest = fetch(
-          "https://remotive.com/api/remote-jobs",
-          { signal: controller.signal }
-        ).then(async (response) => {
-          if (!response.ok) {
-            throw new Error("Remotive request failed");
-          }
-
-          const data = await response.json();
-
-          successfulSources++;
-
-          return (data.jobs || [])
-            .filter(isITJob)
-            .map(normalizeRemotive);
-        });
-
-        // SOURCE 2: HIMALAYAS
-        const himalayasRequests = SEARCH_TERMS.flatMap(
-          (term) =>
-            [1, 2].map(async (page) => {
-              const params = new URLSearchParams({
-                q: term,
-                page: String(page),
-                sort: "recent",
-              });
-
-              const response = await fetch(
-                `/himalayas-api/search?${params}`,
-                { signal: controller.signal }
-              );
-
-              if (!response.ok) {
-                throw new Error("Himalayas request failed");
-              }
-
-              const data = await response.json();
-
-              return (
-                Array.isArray(data.jobs) ? data.jobs : []
-              ).map(normalizeHimalayas);
-            })
-        );
-
-        const results = await Promise.allSettled([
-          remotiveRequest,
-          ...himalayasRequests,
-        ]);
-
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            if (index > 0) successfulSources++;
-            collectedJobs.push(...result.value);
-          }
-        });
-
-        if (controller.signal.aborted) return;
-
-        if (successfulSources === 0) {
-          throw new Error("All job sources failed");
-        }
-
-        // REMOVE DUPLICATES
-        const uniqueJobs = Array.from(
-          new Map(
-            collectedJobs
-              .filter(
-                (job) =>
-                  job.id &&
-                  job.title &&
-                  job.url
-              )
-              .map((job) => [job.id, job])
-          ).values()
-        );
-
-        // NEWEST JOBS FIRST
-        uniqueJobs.sort(
-          (a, b) =>
-            new Date(b.publication_date || 0) -
-            new Date(a.publication_date || 0)
-        );
-
-        setJobs(uniqueJobs);
-      } catch (err) {
-        if (
-          err.name !== "AbortError" &&
-          !controller.signal.aborted
-        ) {
-          setError(
-            "Unable to load jobs. Please try again."
-          );
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    fetchJobs();
-
-    return () => controller.abort();
-  }, [refreshKey]);
-
-  // AVAILABLE CATEGORIES
   const categories = useMemo(
-    () =>
-      [
-        ...new Set(
-          jobs
-            .map((job) => job.category)
-            .filter(Boolean)
-        ),
-      ].sort(),
+    () => [...new Set(jobs.map((job) => job.category).filter(Boolean))].sort(),
     [jobs]
   );
 
-  // FILTER JOBS
+  // The list can hold hundreds of jobs, so only re-filter when jobs or filters
+  // change, not when the page number or saved jobs change.
   const filteredJobs = useMemo(() => {
-    const search = searchTerm.toLowerCase().trim();
-    const place = location.toLowerCase().trim();
+    const search = filters.search.trim().toLowerCase();
+    const location = filters.location.trim().toLowerCase();
 
-    return jobs.filter((job) => {
-      const searchableText = `
-        ${job.title || ""}
-        ${job.company_name || ""}
-        ${job.category || ""}
-      `.toLowerCase();
+    return jobs.filter(
+      (job) =>
+        `${job.title} ${job.company} ${job.category}`
+          .toLowerCase()
+          .includes(search) &&
+        job.location.toLowerCase().includes(location) &&
+        (filters.category === "All" || job.category === filters.category)
+    );
+  }, [jobs, filters]);
 
-      const jobLocation = (
-        job.candidate_required_location || ""
-      ).toLowerCase();
-
-      return (
-        searchableText.includes(search) &&
-        (category === "all" ||
-          job.category === category) &&
-        jobLocation.includes(place)
-      );
-    });
-  }, [jobs, searchTerm, category, location]);
-
-  // PAGINATION
-  const totalPages = Math.ceil(
-    filteredJobs.length / jobsPerPage
+  const savedJobIds = new Set(
+    applications.map((application) => application.externalJobId).filter(Boolean)
   );
 
-  const startIndex = (currentPage - 1) * jobsPerPage;
+  const totalPages = Math.ceil(filteredJobs.length / JOBS_PER_PAGE);
+  // A refresh can return fewer jobs, so never stay past the last page.
+  const currentPage = Math.min(page, Math.max(totalPages, 1));
+  const startIndex = (currentPage - 1) * JOBS_PER_PAGE;
+  const visibleJobs = filteredJobs.slice(startIndex, startIndex + JOBS_PER_PAGE);
 
-  const paginatedJobs = filteredJobs.slice(
-    startIndex,
-    startIndex + jobsPerPage
-  );
+  function handleFilterChange(event) {
+    const { name, value } = event.target;
 
-  // RESET PAGE WHEN FILTERS CHANGE
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, category, location]);
-
-  // TRACK SAVED EXTERNAL JOBS
-  const savedJobIds = useMemo(
-    () =>
-      new Set(
-        applications
-          .map((app) => app.externalJobId)
-          .filter(Boolean)
-      ),
-    [applications]
-  );
-
-  // SAVE JOB USING CONTEXT API
-  function handleSaveJob(job) {
-    if (savedJobIds.has(job.id)) {
-      alert("This job is already in My Applications.");
-      return;
-    }
-
-    const newApplication = {
-      id: crypto.randomUUID(),
-      externalJobId: job.id,
-      company: job.company_name || "",
-      jobTitle: job.title || "",
-      location:
-        job.candidate_required_location || "Remote",
-      status: "Saved",
-      dateApplied: new Date()
-        .toISOString()
-        .slice(0, 10),
-      notes: "",
-      timeline: [],
-      jobUrl: job.url,
-      createdAt: new Date().toISOString(),
-    };
-
-    addApplication(newApplication);
-
-    alert("Job added to My Applications!");
+    setFilters((previous) => ({ ...previous, [name]: value }));
+    setPage(1);
   }
 
-  // CLEAR FILTERS
   function clearFilters() {
-    setSearchTerm("");
-    setCategory("all");
-    setLocation("");
-    setCurrentPage(1);
+    setFilters(DEFAULT_FILTERS);
+    setPage(1);
   }
 
-  const hasFilters =
-    searchTerm.trim() ||
-    category !== "all" ||
-    location.trim();
+  function handlePageChange(nextPage) {
+    setPage(nextPage);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function handleSaveJob(job) {
+    addApplication({
+      externalJobId: job.id,
+      company: job.company || "",
+      jobTitle: job.title,
+      location: job.locationLabel,
+      status: "Saved",
+      dateApplied: "",
+      interviewDate: "",
+      salaryRange: job.salary,
+      notes: "",
+      jobUrl: job.url,
+    });
+  }
 
   return (
-    <main className="explore-page">
+    <>
+      <PageHeader
+        title="Explore Jobs"
+        subtitle="Live remote tech roles. Save the good ones to your tracker."
+        action={
+          <Button variant="secondary" onClick={refresh} disabled={loading}>
+            <RefreshCw
+              size={16}
+              className={loading ? "spin" : undefined}
+              aria-hidden="true"
+            />
+            Refresh
+          </Button>
+        }
+      />
 
-      {/* HERO SECTION */}
-      <section className="explore-hero">
-        <div className="explore-hero-content">
-          <span className="explore-eyebrow">
-            <Globe2 size={16} />
-            YOUR NEXT IT OPPORTUNITY STARTS HERE
-          </span>
-
-          <h1>
-            Discover Your Next
-            <span> Tech Career.</span>
-          </h1>
-
-          <p>
-            Explore remote Front-End, React, Full-Stack,
-            Software Engineering, DevOps, and other
-            technology opportunities around the world.
-          </p>
-
-          <div className="explore-hero-stats">
-            <div>
-              <strong>{jobs.length}</strong>
-              <span>Available IT jobs</span>
-            </div>
-
-            <div>
-              <strong>
-                {
-                  new Set(
-                    jobs.map((job) => job.company_name)
-                  ).size
-                }
-              </strong>
-              <span>Companies</span>
-            </div>
-
-            <div>
-              <strong>{categories.length}</strong>
-              <span>Categories</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="explore-hero-decoration">
-          <BriefcaseBusiness
-            size={76}
-            strokeWidth={1.4}
+      <div className="filter-bar">
+        <div className="filter-control filter-control-grow">
+          <label htmlFor="jobs-search">Search</label>
+          <input
+            id="jobs-search"
+            name="search"
+            type="search"
+            placeholder="React, company, category..."
+            value={filters.search}
+            onChange={handleFilterChange}
           />
         </div>
-      </section>
 
-      {/* SEARCH AND FILTERS */}
-      <section className="explore-search-panel">
-        <div className="explore-search-heading">
-          <div>
-            <h2>Find your perfect IT role</h2>
-            <p>
-              Search by technology, company, or location.
-            </p>
-          </div>
-
-          <SlidersHorizontal size={22} />
+        <div className="filter-control">
+          <label htmlFor="jobs-location">Location</label>
+          <input
+            id="jobs-location"
+            name="location"
+            type="search"
+            placeholder="e.g. India"
+            value={filters.location}
+            onChange={handleFilterChange}
+          />
         </div>
 
-        <div className="explore-filters">
-          <div className="explore-input-wrap">
-            <Search size={19} />
-
-            <input
-              type="search"
-              placeholder="React, Front-End, Software Engineer..."
-              value={searchTerm}
-              onChange={(e) =>
-                setSearchTerm(e.target.value)
-              }
-            />
-          </div>
-
-          <div className="explore-input-wrap">
-            <MapPin size={19} />
-
-            <input
-              type="search"
-              placeholder="Location..."
-              value={location}
-              onChange={(e) =>
-                setLocation(e.target.value)
-              }
-            />
-          </div>
-
+        <div className="filter-control">
+          <label htmlFor="jobs-category">Category</label>
           <select
-            className="explore-category-select"
-            value={category}
-            onChange={(e) =>
-              setCategory(e.target.value)
-            }
+            id="jobs-category"
+            name="category"
+            value={filters.category}
+            onChange={handleFilterChange}
           >
-            <option value="all">
-              All IT Categories
-            </option>
-
-            {categories.map((item) => (
-              <option key={item} value={item}>
-                {item}
+            <option value="All">All categories</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
               </option>
             ))}
           </select>
         </div>
+      </div>
 
-        {hasFilters && (
-          <button
-            className="explore-clear-btn"
-            onClick={clearFilters}
-            type="button"
-          >
-            <X size={15} />
-            Clear filters
-          </button>
-        )}
-      </section>
-
-      {/* JOB RESULTS */}
-      <section className="explore-results-section">
-        <div className="explore-results-header">
-          <div>
-            <h2>Latest IT Opportunities</h2>
-
-            <p>
-              {loading
-                ? "Finding IT opportunities..."
-                : `Showing ${filteredJobs.length} of ${jobs.length} jobs`}
-            </p>
-          </div>
-
-          <button
-            className="explore-refresh-btn"
-            onClick={() =>
-              setRefreshKey((key) => key + 1)
-            }
-            disabled={loading}
-            type="button"
-          >
-            <RefreshCw size={16} />
-            Refresh
-          </button>
+      {loading && (
+        <div className="card-grid" role="status" aria-label="Loading jobs">
+          {SKELETON_IDS.map((id) => (
+            <JobCardSkeleton key={id} />
+          ))}
         </div>
+      )}
 
-        {/* LOADING */}
-        {loading && (
-          <div className="explore-message">
-            <RefreshCw
-              className="explore-spin"
-              size={28}
-            />
+      {!loading && error && (
+        <div className="panel" role="alert">
+          <EmptyState
+            icon={CloudOff}
+            title="Couldn't load jobs"
+            message={error}
+            action={<Button onClick={refresh}>Try again</Button>}
+          />
+        </div>
+      )}
 
-            <h3>Loading IT opportunities...</h3>
+      {!loading && !error && filteredJobs.length === 0 && (
+        <div className="panel">
+          <EmptyState
+            icon={SearchX}
+            title="No matching jobs"
+            message="Try another keyword or clear your filters."
+            action={
+              <Button variant="secondary" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        </div>
+      )}
 
-            <p>
-              Searching multiple remote job sources.
-            </p>
+      {!loading && !error && filteredJobs.length > 0 && (
+        <>
+          <p className="results-count" aria-live="polite">
+            Showing {filteredJobs.length} of {jobs.length} jobs
+          </p>
+
+          <div className="card-grid">
+            {visibleJobs.map((job) => (
+              <JobCard
+                key={job.id}
+                job={job}
+                isSaved={savedJobIds.has(job.id)}
+                onSave={handleSaveJob}
+              />
+            ))}
           </div>
-        )}
 
-        {/* ERROR */}
-        {!loading && error && (
-          <div
-            className="explore-message"
-            role="alert"
-          >
-            <h3>Unable to load jobs</h3>
-            <p>{error}</p>
-
-            <button
-              className="explore-retry-btn"
-              onClick={() =>
-                setRefreshKey((key) => key + 1)
-              }
-            >
-              Try Again
-            </button>
-          </div>
-        )}
-
-        {/* NO RESULTS */}
-        {!loading &&
-          !error &&
-          filteredJobs.length === 0 && (
-            <div className="explore-message">
-              <Search size={32} />
-
-              <h3>No matching IT jobs found</h3>
-
-              <p>
-                Try another keyword or clear your filters.
-              </p>
-
-              <button
-                className="explore-retry-btn"
-                onClick={clearFilters}
-              >
-                Clear Filters
-              </button>
-            </div>
-          )}
-
-        {/* JOB CARDS */}
-        {!loading &&
-          !error &&
-          filteredJobs.length > 0 && (
-            <div className="explore-jobs-grid">
-              {paginatedJobs.map((job) => {
-                const isSaved = savedJobIds.has(job.id);
-
-                return (
-                  <article
-                    className="explore-job-card"
-                    key={job.id}
-                  >
-                    <div className="explore-job-top">
-                      <div className="explore-company-avatar">
-                        {(job.company_name || "J")
-                          .slice(0, 1)
-                          .toUpperCase()}
-                      </div>
-
-                      <span className="explore-remote-badge">
-                        <Globe2 size={13} />
-                        Remote
-                      </span>
-                    </div>
-
-                    <h3>{job.title}</h3>
-
-                    <div className="explore-company-name">
-                      <Building2 size={16} />
-                      <span>{job.company_name}</span>
-                    </div>
-
-                    <div className="explore-job-details">
-                      <div>
-                        <MapPin size={16} />
-                        <span>
-                          {job.candidate_required_location}
-                        </span>
-                      </div>
-
-                      <div>
-                        <BriefcaseBusiness size={16} />
-                        <span>
-                          {formatJobType(job.job_type)}
-                        </span>
-                      </div>
-
-                      {formatSalary(job) && (
-                        <div className="explore-salary">
-                          <span>
-                            {formatSalary(job)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="explore-job-bottom">
-                      <span className="explore-job-category">
-                        {job.category}
-                      </span>
-
-                      {job.publication_date && (
-                        <span className="explore-job-date">
-                          <Clock3 size={13} />
-                          {new Date(
-                            job.publication_date
-                          ).toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* EXTERNAL JOB LINK */}
-                    <a
-                      href={job.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="explore-view-job-btn"
-                    >
-                      View Opportunity
-                      <ExternalLink size={16} />
-                    </a>
-
-                    {/* SAVE JOB */}
-                    <button
-                      type="button"
-                      className="explore-save-job-btn"
-                      disabled={isSaved}
-                      onClick={() => handleSaveJob(job)}
-                      style={
-                        isSaved
-                          ? {
-                              opacity: 0.7,
-                              cursor: "not-allowed",
-                            }
-                          : undefined
-                      }
-                    >
-                      {isSaved ? (
-                        <>
-                          <Check size={16} />
-                          Saved ✓
-                        </>
-                      ) : (
-                        "+ Add to My Applications"
-                      )}
-                    </button>
-
-                    {/* JOB SOURCE */}
-                    <p
-                      style={{
-                        textAlign: "center",
-                        fontSize: "11px",
-                        color: "#898297",
-                        margin: "10px 0 0",
-                      }}
-                    >
-                      Source:{" "}
-                      <a
-                        href={
-                          job.source === "Himalayas"
-                            ? "https://himalayas.app"
-                            : "https://remotive.com"
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {job.source}
-                      </a>
-                    </p>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-
-        {/* PAGINATION */}
-        {!loading &&
-          !error &&
-          totalPages > 1 && (
-            <div className="explore-pagination">
-              <button
-                type="button"
-                disabled={currentPage === 1}
-                onClick={() =>
-                  setCurrentPage((page) =>
-                    Math.max(1, page - 1)
-                  )
-                }
-              >
-                ← Previous
-              </button>
-
-              <span>
-                Page {currentPage} of {totalPages}
-              </span>
-
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() =>
-                  setCurrentPage((page) =>
-                    Math.min(totalPages, page + 1)
-                  )
-                }
-              >
-                Next →
-              </button>
-            </div>
-          )}
-      </section>
-    </main>
+          <Pagination
+            page={currentPage}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
+        </>
+      )}
+    </>
   );
 }
 
